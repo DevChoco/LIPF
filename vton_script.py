@@ -448,4 +448,3 @@ class LeffaVirtualTryOn:
 #             gen_image.save(output_path)
         
 #         return gen_image, mask, densepose, full_body_mask, agnostic_image, skin_image
-
