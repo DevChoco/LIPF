@@ -49,7 +49,7 @@ async def virtual_tryon(src_image: UploadFile = File(...), ref_image: UploadFile
             with open(ref_img_path, "wb") as f:
                 f.write(await ref_image.read())
 
-        output_image, mask, densepose = vton.leffa_predict(
+        output_image, mask, densepose, full_body_mask, agnostic_image, skin_image = vton.leffa_predict(
             src_image_path=src_img_path,
             ref_image_path=ref_img_path,
             control_type="virtual_tryon",
