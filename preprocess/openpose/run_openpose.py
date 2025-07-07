@@ -64,10 +64,11 @@ class OpenPose:
             #     json.dump(keypoints, f)
             #
             # # print(candidate)
-            # output_image = cv2.resize(cv2.cvtColor(detected_map, cv2.COLOR_BGR2RGB), (768, 1024))
+            output_image_np = cv2.resize(cv2.cvtColor(detected_map, cv2.COLOR_BGR2RGB), (768, 1024))
+            output_image = Image.fromarray(output_image_np)
             # cv2.imwrite('/home/aigc/ProjectVTON/OpenPose/keypoints/out_pose.jpg', output_image)
 
-        return keypoints
+        return {"image": output_image, "keypoints": keypoints}
 
 
 if __name__ == '__main__':
