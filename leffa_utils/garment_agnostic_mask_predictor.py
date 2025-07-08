@@ -293,6 +293,10 @@ class AutoMasker:
             forearm_protect = part_mask_of(["forearms"], densepose_mask, DENSE_INDEX_MAP)
             forearm_protect = cv2.dilate(forearm_protect, dilate_kernel, iterations=1)
             strong_protect_area |= forearm_protect
+        if part == "upper":
+            hands_area = part_mask_of(["hands"], densepose_mask, DENSE_INDEX_MAP)
+            hands_area = cv2.dilate(hands_area, dilate_kernel, iterations=1)
+            strong_protect_area |= hands_area
 
         # Weak Protect Area (Hair, Irrelevant Clothes, Body Parts)
         body_protect_area = part_mask_of(

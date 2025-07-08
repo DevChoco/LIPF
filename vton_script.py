@@ -163,6 +163,8 @@ class LeffaVirtualTryOn:
         # vt_garment_type에 따라 마스킹 영역 결정
         if vt_garment_type == "upper_body":
             garment_mask_np = np.isin(parsing_map, [4]).astype(np.uint8)  # 상의
+            hands_mask_np = np.isin(parsing_map, [14, 15]).astype(np.uint8)  # 손
+            garment_mask_np |= hands_mask_np
         elif vt_garment_type == "lower_body":
             garment_mask_np = np.isin(parsing_map, [5]).astype(np.uint8)  # 하의
         else:
@@ -195,7 +197,7 @@ class LeffaVirtualTryOn:
         agnostic_image = final_image
 
         # 이후 반환값에 inpaint_mask_img 포함
-        return final_image, inpaint_mask_img
+        return final_image, inpaint_mask_img, parsing_map
 
     def leffa_predict(
         self,
@@ -233,6 +235,8 @@ class LeffaVirtualTryOn:
         # vt_garment_type에 따라 마스킹 영역 결정
         if vt_garment_type == "upper_body":
             garment_mask_np = np.isin(parsing_map, [4]).astype(np.uint8)  # 상의
+            hands_mask_np = np.isin(parsing_map, [14, 15]).astype(np.uint8)  # 손
+            garment_mask_np |= hands_mask_np
         elif vt_garment_type == "lower_body":
             garment_mask_np = np.isin(parsing_map, [5]).astype(np.uint8)  # 하의
         else:
@@ -321,6 +325,16 @@ class LeffaVirtualTryOn:
         # 9. 결과 반환
         if output_path:
             gen_image.save(output_path)
+
+            # Save and display Ground Truth and Prediction images
+            gt_path = os.path.join(os.path.dirname(output_path), "ground_truth.png")
+            pred_path = os.path.join(os.path.dirname(output_path), "prediction.png")
+
+            ref_image.save(gt_path)
+            gen_image.save(pred_path)
+
+            print(f"Ground Truth saved at: {gt_path}")
+            print(f"Prediction saved at: {pred_path}")
 
         # FID 점수 계산
         # gen_image_dir = "temp_generated_images"
