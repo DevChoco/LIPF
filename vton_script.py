@@ -11,6 +11,9 @@ from preprocess.openpose.run_openpose import OpenPose
 import torch
 from diffusers import StableDiffusionControlNetInpaintPipeline, ControlNetModel
 import cv2 
+from pytorch_fid import fid_score
+import os
+import shutil
 
 class LeffaVirtualTryOn:
     def __init__(self, ckpt_dir: str):
@@ -157,6 +160,14 @@ class LeffaVirtualTryOn:
         limb_mask_img = Image.fromarray(limb_mask_raw * 255).resize(src_image.size, Image.NEAREST)
         limb_mask_np = np.array(limb_mask_img.convert("L")) > 128
         
+        # vt_garment_type에 따라 마스킹 영역 결정
+        if vt_garment_type == "upper_body":
+            garment_mask_np = np.isin(parsing_map, [4]).astype(np.uint8)  # 상의
+        elif vt_garment_type == "lower_body":
+            garment_mask_np = np.isin(parsing_map, [5]).astype(np.uint8)  # 하의
+        else:
+            garment_mask_np = np.isin(parsing_map, [4, 5]).astype(np.uint8)  # 기본적으로 상의와 하의 포함
+
         # 4. 인페인팅할 마스크 계산 (의상과 팔/다리가 겹치는 영역)
         inpaint_mask_np = garment_mask_np & limb_mask_np
         
@@ -181,9 +192,9 @@ class LeffaVirtualTryOn:
             seed=seed
         )
 
-        if output_path:
-            final_image.save(output_path)
+        agnostic_image = final_image
 
+        # 이후 반환값에 inpaint_mask_img 포함
         return final_image, inpaint_mask_img
 
     def leffa_predict(
@@ -218,6 +229,14 @@ class LeffaVirtualTryOn:
         limb_mask_raw = np.isin(parsing_map, [4, 5]).astype(np.uint8)  # 팔(4), 다리(5)
         limb_mask_img = Image.fromarray(limb_mask_raw * 255).resize(src_image.size, Image.NEAREST)
         limb_mask_np = np.array(limb_mask_img.convert("L")) > 128
+
+        # vt_garment_type에 따라 마스킹 영역 결정
+        if vt_garment_type == "upper_body":
+            garment_mask_np = np.isin(parsing_map, [4]).astype(np.uint8)  # 상의
+        elif vt_garment_type == "lower_body":
+            garment_mask_np = np.isin(parsing_map, [5]).astype(np.uint8)  # 하의
+        else:
+            garment_mask_np = np.isin(parsing_map, [4, 5]).astype(np.uint8)  # 기본적으로 상의와 하의 포함
 
         # 4. 인페인팅할 마스크 계산 (의상과 팔/다리가 겹치는 영역)
         inpaint_mask_np = garment_mask_np & limb_mask_np
@@ -302,8 +321,47 @@ class LeffaVirtualTryOn:
         # 9. 결과 반환
         if output_path:
             gen_image.save(output_path)
-        
-        return gen_image, mask, densepose
+
+        # FID 점수 계산
+        # gen_image_dir = "temp_generated_images"
+        # ref_image_dir = "temp_reference_images"
+
+        # os.makedirs(gen_image_dir, exist_ok=True)
+        # os.makedirs(ref_image_dir, exist_ok=True)
+
+        # gen_image_path = os.path.join(gen_image_dir, "gen_image.png")
+        # ref_image_path = os.path.join(ref_image_dir, "ref_image.png")
+
+        # gen_image.save(gen_image_path)
+        # ref_image.save(ref_image_path)
+
+        # # 디버깅: gen_image와 ref_image의 값 확인
+        # gen_image_np = np.array(gen_image)
+        # ref_image_np = np.array(ref_image)
+
+        # print("gen_image 값 범위:", gen_image_np.min(), gen_image_np.max())
+        # print("ref_image 값 범위:", ref_image_np.min(), ref_image_np.max())
+
+        # if not np.isfinite(gen_image_np).all():
+        #     raise ValueError("gen_image에 NaN 또는 Inf 값이 포함되어 있습니다.")
+
+        # if not np.isfinite(ref_image_np).all():
+        #     raise ValueError("ref_image에 NaN 또는 Inf 값이 포함되어 있습니다.")
+
+        # fid_value = fid_score.calculate_fid_given_paths(
+        #     [gen_image_dir, ref_image_dir],
+        #     batch_size=1,
+        #     device="cuda",
+        #     dims=2048
+        # )
+
+        # # 임시 디렉토리 정리
+        # shutil.rmtree(gen_image_dir)
+        # shutil.rmtree(ref_image_dir)
+
+        # print(f"FID 점수: {fid_value}")
+
+        return gen_image, mask, densepose, agnostic_image
     
     def leffa_predict_old(
         self,
