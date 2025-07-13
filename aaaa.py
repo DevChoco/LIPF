@@ -1,21 +1,27 @@
 import os
 from shutil import copyfile
 
-def duplicate_images(input_path, output_dir, count):
+def distribute_images(input_paths, output_dir, total_count):
     """
-    Duplicate an image multiple times.
+    Distribute images to create a total number of duplicates.
 
-    :param input_path: Path to the input image.
+    :param input_paths: List of input image paths.
     :param output_dir: Directory to save the duplicated images.
-    :param count: Number of duplicates to create.
+    :param total_count: Total number of duplicates to create.
     """
     os.makedirs(output_dir, exist_ok=True)
-    base_name = os.path.splitext(os.path.basename(input_path))[0]
-    ext = os.path.splitext(input_path)[1]
 
-    for i in range(count):
-        output_path = os.path.join(output_dir, f"{base_name}_{i+1}{ext}")
-        copyfile(input_path, output_path)
+    num_images = len(input_paths)
+    base_count = total_count // num_images
+    extra_count = total_count % num_images
+
+    count = 0
+    for i, input_path in enumerate(input_paths):
+        duplicates = base_count + (1 if i < extra_count else 0)
+        for j in range(duplicates):
+            count += 1
+            output_path = os.path.join(output_dir, f"a ({count}).png")
+            copyfile(input_path, output_path)
 
 # Input images and output directory
 input_images = [
@@ -23,14 +29,12 @@ input_images = [
     "in_img/person/입력이미지2.png",
     "in_img/person/입력이미지3.png"
 ]
-output_base_dir = "in_img/person/duplicated/"
+output_dir = "in_img/person/duplicated/"
 
-# Number of duplicates
-duplicate_count = 250
+# Total number of duplicates
+total_duplicate_count = 250
 
-# Process each image
-for input_image in input_images:
-    output_dir = os.path.join(output_base_dir, os.path.splitext(os.path.basename(input_image))[0])
-    duplicate_images(input_image, output_dir, duplicate_count)
+# Distribute images
+distribute_images(input_images, output_dir, total_duplicate_count)
 
-print("Images duplicated successfully.")
+print("Images distributed successfully with new naming format.")
