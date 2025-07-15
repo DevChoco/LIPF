@@ -1,5 +1,5 @@
-# Leffa_API_Kit
-> Leffa: Learning Flow Fields in Attention for Controllable Person Image Generation
+# LIPF
+> LIPF: Learning Inpainted Pre-Flows in Attention
 
 ## Acknowledgement
 Created by modifying [Leffa](https://github.com/franciszzj/LEFFA).
