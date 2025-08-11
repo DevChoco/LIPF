@@ -11,9 +11,7 @@ from preprocess.openpose.run_openpose import OpenPose
 import torch
 from diffusers import StableDiffusionControlNetInpaintPipeline, ControlNetModel
 import cv2 
-from pytorch_fid import fid_score
 import os
-import shutil
 
 class LeffaVirtualTryOn:
     def __init__(self, ckpt_dir: str):
@@ -76,29 +74,22 @@ class LeffaVirtualTryOn:
         주어진 마스크 영역에 사실적인 피부를 인페인팅합니다.
         Inpaints realistic skin in the given masked area using a dedicated skin model.
         """
-        # To generate skin that matches the person, use a more neutral prompt
-        # and guide the model to be less creative.
+        
         skin_prompt = "Wearing Held Tight Short Sleeve Shirt, high quality skin, realistic, high quality"
         negative_prompt = "Blurry, low quality, artifacts, deformed, ugly, , texture, watermark, text, bad anatomy, extra limbs, face, hands, fingers"
 
-        # Generate OpenPose control image
         openpose_result = self.openpose(src_image)
         
-        # dict 형태일 경우 image 키 추출
         if isinstance(openpose_result, dict):
             openpose_image = openpose_result.get("image")
         else:
             openpose_image = openpose_result
         
-        # 검증: 이미지가 정상적으로 반환되었는지 확인
         if not isinstance(openpose_image, Image.Image):
             raise TypeError(f"OpenPose에서 반환된 control image가 유효하지 않습니다: {type(openpose_image)}")
         
-        # 이후 파이프라인 호출
-
         generator = torch.Generator(device="cuda").manual_seed(seed)
 
-        # Use the dedicated skin inpainting pipeline
         generated_image = self.skin_pipe(
             prompt=skin_prompt,
             negative_prompt=negative_prompt,
@@ -112,14 +103,11 @@ class LeffaVirtualTryOn:
             guidance_scale=7.0  # Lower guidance to better match image context
         ).images[0]
 
-        # Explicitly composite the generated skin onto the original image
-        # to ensure only the masked area is affected.
         src_np = np.array(src_image)
         mask_np = np.array(inpaint_mask_img.convert("L")) / 255.0
         mask_np = np.expand_dims(mask_np, axis=-1)
         generated_np = np.array(generated_image)
 
-        # Combine the original image (outside the mask) with the generated skin (inside the mask)
         final_np = src_np * (1 - mask_np) + generated_np * mask_np
         final_image = Image.fromarray(final_np.astype(np.uint8))
 
@@ -128,65 +116,55 @@ class LeffaVirtualTryOn:
     def skin_test(
         self,
         src_image_path: str,
-        ref_image_path: str,  # 사용되지 않지만 호환성을 위해 유지
-        control_type: str,    # 사용되지 않지만 호환성을 위해 유지
+        ref_image_path: str, 
+        control_type: str,
         output_path: str = None,
         step: int = 40,
         seed: int = 42,
         cross_attention_kwargs={"scale": 3},
-        vt_model_type: str = "viton_hd",      # 사용되지 않지만 호환성을 위해 유지
-        vt_garment_type: str = "upper_body",# 사용되지 않지만 호환성을 위해 유지
-        vt_repaint: bool = False,             # 사용되지 않지만 호환성을 위해 유지
-        ref_acceleration: bool = False,       # 사용되지 않지만 호환성을 위해 유지
-        src_mask_path: str = None             # 사용되지 않지만 호환성을 위해 유지
+        vt_model_type: str = "viton_hd",
+        vt_garment_type: str = "upper_body",
+        vt_repaint: bool = False,
+        ref_acceleration: bool = False,
+        src_mask_path: str = None     
     ):
         """
         이미지에서 팔과 다리의 옷을 제거하고 사실적인 피부로 인페인팅합니다.
         Removes clothing from arms and legs in an image and inpaints with realistic skin.
         """
-        # 1. 이미지 로드 및 준비
         src_image = Image.open(src_image_path).convert("RGB")
         src_image = resize_and_center(src_image, 768, 1024)
 
-        # 2. 원본 이미지에서 의상 마스크 추출
         garment_mask_img = self.mask_predictor(src_image, "overall")["mask"]
         garment_mask_np = np.array(garment_mask_img.convert("L")) > 128
 
-        
-        # 3. 휴먼 파싱을 통해 팔과 다리 마스크 추출
         parsing_map, _ = self.parsing(src_image.resize((768, 1024)))
         parsing_map = np.array(parsing_map)
-        limb_mask_raw = np.isin(parsing_map, [4, 5]).astype(np.uint8)  # 팔(4), 다리(5)
+        limb_mask_raw = np.isin(parsing_map, [4, 5]).astype(np.uint8)
         limb_mask_img = Image.fromarray(limb_mask_raw * 255).resize(src_image.size, Image.NEAREST)
         limb_mask_np = np.array(limb_mask_img.convert("L")) > 128
         
-        # vt_garment_type에 따라 마스킹 영역 결정
         if vt_garment_type == "upper_body":
-            garment_mask_np = np.isin(parsing_map, [4]).astype(np.uint8)  # 상의
-            hands_mask_np = np.isin(parsing_map, [14, 15]).astype(np.uint8)  # 손
+            garment_mask_np = np.isin(parsing_map, [4]).astype(np.uint8)
+            hands_mask_np = np.isin(parsing_map, [14, 15]).astype(np.uint8) 
             garment_mask_np |= hands_mask_np
         elif vt_garment_type == "lower_body":
-            garment_mask_np = np.isin(parsing_map, [5]).astype(np.uint8)  # 하의
+            garment_mask_np = np.isin(parsing_map, [5]).astype(np.uint8)
         else:
-            garment_mask_np = np.isin(parsing_map, [4, 5]).astype(np.uint8)  # 기본적으로 상의와 하의 포함
+            garment_mask_np = np.isin(parsing_map, [4, 5]).astype(np.uint8)
 
-        # 4. 인페인팅할 마스크 계산 (의상과 팔/다리가 겹치는 영역)
         inpaint_mask_np = garment_mask_np & limb_mask_np
         
-        # 5. 마스크에 10px 마진 추가 (팽창)
         kernel = np.ones((10, 10), np.uint8)  # 10px 마진용 커널
         inpaint_mask_np_dilated = cv2.dilate(inpaint_mask_np.astype(np.uint8), kernel, iterations=1)
         
-        # PIL 이미지로 변환
         inpaint_mask_img = Image.fromarray(inpaint_mask_np_dilated * 255)
 
-        # 인페인팅할 영역이 없으면 원본 이미지와 빈 마스크 반환
         if not np.any(inpaint_mask_np):
             if output_path:
                 src_image.save(output_path)
             return src_image, Image.fromarray(np.zeros_like(inpaint_mask_np, dtype=np.uint8) * 255)
 
-        # 6. 피부 생성 호출
         final_image = self.generate_skin(
             src_image=src_image,
             inpaint_mask_img=inpaint_mask_img,
@@ -196,7 +174,6 @@ class LeffaVirtualTryOn:
 
         agnostic_image = final_image
 
-        # 이후 반환값에 inpaint_mask_img 포함
         return final_image, inpaint_mask_img, parsing_map
 
     def leffa_predict(
@@ -221,44 +198,36 @@ class LeffaVirtualTryOn:
         src_image = resize_and_center(src_image, 768, 1024)
         ref_image = resize_and_center(ref_image, 768, 1024)
 
-        # 2. 원본 이미지에서 의상 마스크 추출
         garment_mask_img = self.mask_predictor(src_image, "overall")["mask"]
         garment_mask_np = np.array(garment_mask_img.convert("L")) > 128
 
-        # 3. 휴먼 파싱을 통해 팔과 다리 마스크 추출
         parsing_map, _ = self.parsing(src_image.resize((768, 1024)))
         parsing_map = np.array(parsing_map)
-        limb_mask_raw = np.isin(parsing_map, [4, 5]).astype(np.uint8)  # 팔(4), 다리(5)
+        limb_mask_raw = np.isin(parsing_map, [4, 5]).astype(np.uint8)
         limb_mask_img = Image.fromarray(limb_mask_raw * 255).resize(src_image.size, Image.NEAREST)
         limb_mask_np = np.array(limb_mask_img.convert("L")) > 128
 
-        # vt_garment_type에 따라 마스킹 영역 결정
         if vt_garment_type == "upper_body":
-            garment_mask_np = np.isin(parsing_map, [4]).astype(np.uint8)  # 상의
-            hands_mask_np = np.isin(parsing_map, [14, 15]).astype(np.uint8)  # 손
+            garment_mask_np = np.isin(parsing_map, [4]).astype(np.uint8)
+            hands_mask_np = np.isin(parsing_map, [14, 15]).astype(np.uint8)
             garment_mask_np |= hands_mask_np
         elif vt_garment_type == "lower_body":
-            garment_mask_np = np.isin(parsing_map, [5]).astype(np.uint8)  # 하의
+            garment_mask_np = np.isin(parsing_map, [5]).astype(np.uint8)
         else:
-            garment_mask_np = np.isin(parsing_map, [4, 5]).astype(np.uint8)  # 기본적으로 상의와 하의 포함
+            garment_mask_np = np.isin(parsing_map, [4, 5]).astype(np.uint8)
 
-        # 4. 인페인팅할 마스크 계산 (의상과 팔/다리가 겹치는 영역)
         inpaint_mask_np = garment_mask_np & limb_mask_np
 
-        # 5. 마스크에 10px 마진 추가 (팽창)
         kernel = np.ones((10, 10), np.uint8)  # 10px 마진용 커널
         inpaint_mask_np_dilated = cv2.dilate(inpaint_mask_np.astype(np.uint8), kernel, iterations=1)
 
-        # PIL 이미지로 변환
         inpaint_mask_img = Image.fromarray(inpaint_mask_np_dilated * 255)
 
-        # 인페인팅할 영역이 없으면 원본 이미지와 빈 마스크 반환
         if not np.any(inpaint_mask_np):
             if output_path:
                 src_image.save(output_path)
             return src_image, Image.fromarray(np.zeros_like(inpaint_mask_np, dtype=np.uint8) * 255)
 
-        # 6. 피부 생성 호출
         final_image = self.generate_skin(
             src_image=src_image,
             inpaint_mask_img=inpaint_mask_img,
@@ -268,7 +237,6 @@ class LeffaVirtualTryOn:
         
         agnostic_image = final_image
         
-        # 7. 메인 마스크 생성
         if control_type == "virtual_tryon":
             garment_mapping = {
                 "dresses": "overall",
@@ -285,7 +253,6 @@ class LeffaVirtualTryOn:
         else:
             mask = Image.fromarray(np.ones_like(agnostic_np, dtype=np.uint8) * 255)
     
-        # 8. DensePose 생성
         agnostic_np = np.array(agnostic_image)
         if vt_model_type == "viton_hd":
             seg = self.densepose_predictor.predict_seg(agnostic_np)[:, :, ::-1]
@@ -294,7 +261,6 @@ class LeffaVirtualTryOn:
             seg = np.concatenate([iuv[:, :, :1]] * 3, axis=-1)
         densepose = Image.fromarray(seg)
     
-        # 9. 최종 가상 피팅
         transform = LeffaTransform()
         data = {
             "src_image": [agnostic_image],
@@ -322,11 +288,9 @@ class LeffaVirtualTryOn:
     
         gen_image = result["generated_image"][0]
     
-        # 9. 결과 반환
         if output_path:
             gen_image.save(output_path)
 
-            # Save and display Ground Truth and Prediction images
             gt_path = os.path.join(os.path.dirname(output_path), "ground_truth.png")
             pred_path = os.path.join(os.path.dirname(output_path), "prediction.png")
 
@@ -336,125 +300,4 @@ class LeffaVirtualTryOn:
             print(f"Ground Truth saved at: {gt_path}")
             print(f"Prediction saved at: {pred_path}")
 
-        # FID 점수 계산
-        # gen_image_dir = "temp_generated_images"
-        # ref_image_dir = "temp_reference_images"
-
-        # os.makedirs(gen_image_dir, exist_ok=True)
-        # os.makedirs(ref_image_dir, exist_ok=True)
-
-        # gen_image_path = os.path.join(gen_image_dir, "gen_image.png")
-        # ref_image_path = os.path.join(ref_image_dir, "ref_image.png")
-
-        # gen_image.save(gen_image_path)
-        # ref_image.save(ref_image_path)
-
-        # # 디버깅: gen_image와 ref_image의 값 확인
-        # gen_image_np = np.array(gen_image)
-        # ref_image_np = np.array(ref_image)
-
-        # print("gen_image 값 범위:", gen_image_np.min(), gen_image_np.max())
-        # print("ref_image 값 범위:", ref_image_np.min(), ref_image_np.max())
-
-        # if not np.isfinite(gen_image_np).all():
-        #     raise ValueError("gen_image에 NaN 또는 Inf 값이 포함되어 있습니다.")
-
-        # if not np.isfinite(ref_image_np).all():
-        #     raise ValueError("ref_image에 NaN 또는 Inf 값이 포함되어 있습니다.")
-
-        # fid_value = fid_score.calculate_fid_given_paths(
-        #     [gen_image_dir, ref_image_dir],
-        #     batch_size=1,
-        #     device="cuda",
-        #     dims=2048
-        # )
-
-        # # 임시 디렉토리 정리
-        # shutil.rmtree(gen_image_dir)
-        # shutil.rmtree(ref_image_dir)
-
-        # print(f"FID 점수: {fid_value}")
-
         return gen_image, mask, densepose, agnostic_image
-    
-    def leffa_predict_old(
-        self,
-        src_image_path,
-        ref_image_path,
-        control_type,
-        ref_acceleration=False,
-        output_path: str = None,
-        step=30,
-        cross_attention_kwargs={"scale": 3},
-        seed=42,
-        vt_model_type="viton_hd",
-        vt_garment_type="upper_body",
-        vt_repaint=False,
-        src_mask_path=None  # 선택적 경로 저장
-    ):
-        assert control_type in ["virtual_tryon", "pose_transfer"], f"Invalid control type: {control_type}"
-        
-        src_image = Image.open(src_image_path).convert("RGB")
-        ref_image = Image.open(ref_image_path).convert("RGB")
-
-        src_image = resize_and_center(src_image, 768, 1024)
-        ref_image = resize_and_center(ref_image, 768, 1024)
-
-        src_image_array = np.array(src_image)
-
-        # Mask 생성
-        if control_type == "virtual_tryon":
-            # vt_garment_type을 AutoMasker의 mask_type에 매핑
-            if vt_garment_type == "dresses":
-                garment_type_hd = "overall"  # AutoMasker에서 허용되는 값으로 매핑
-            elif vt_garment_type == "upper_body":
-                garment_type_hd = "upper"
-            elif vt_garment_type == "lower_body":
-                garment_type_hd = "lower"
-            else:
-                raise ValueError(f"Invalid vt_garment_type: {vt_garment_type}")
-
-            mask = self.mask_predictor(src_image, garment_type_hd)["mask"]
-
-            if src_mask_path:
-                mask.save(src_mask_path)
-
-        elif control_type == "pose_transfer":
-            mask = Image.fromarray(np.ones_like(src_image_array, dtype=np.uint8) * 255)
-
-        # DensePose
-        if vt_model_type == "viton_hd":
-            seg = self.densepose_predictor.predict_seg(src_image_array)[:, :, ::-1]
-        else:
-            iuv = self.densepose_predictor.predict_iuv(src_image_array)
-            seg = np.concatenate([iuv[:, :, :1]] * 3, axis=-1)
-        densepose = Image.fromarray(seg)
-
-        # Transform 및 inference
-        transform = LeffaTransform()
-        data = {
-            "src_image": [src_image],
-            "ref_image": [ref_image],
-            "mask": [mask],
-            "densepose": [densepose],
-        }
-        data = transform(data)
-
-        inference = self.vt_inference_hd if vt_model_type == "viton_hd" else self.vt_inference_dc
-        result = inference(
-            data,
-            ref_acceleration=ref_acceleration,
-            num_inference_steps=step,
-            cross_attention_kwargs={"scale": cross_attention_kwargs},  # scale을 cross_attention_kwargs로 전달
-            seed=seed,
-            repaint=vt_repaint
-        )
-
-        gen_image = result["generated_image"][0]
-
-        torch.cuda.empty_cache()
-
-        if output_path:
-            gen_image.save(output_path)
-        
-        return gen_image, mask, densepose
